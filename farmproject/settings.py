@@ -12,6 +12,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+import os # <--- ADD THIS LINE to import the os module
+from dotenv import load_dotenv # <--- ADD THIS LINE if you're using python-dotenv
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -202,3 +205,12 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com') # Default for Gmail
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() == 'true' # Convert string to boolean
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER') # Your sending email address (e.g., your_email@gmail.com)
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD') # Your email app password
+DEFAULT_FROM_EMAIL = os.environ.get('EMAIL_HOST_USER', 'webmaster@yourdomain.com') # Used as the "From" address
+SERVER_EMAIL = DEFAULT_FROM_EMAIL # Used for error reporting emails

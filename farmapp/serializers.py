@@ -1,10 +1,13 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from .models import farmuser, cows, MilkProduction, Breed, FeedType, DailyFeedingLog, DailyFeedQuantity, BreedingRecords, CowHealthRecord, Calf, Notification
+from .models import farmuser, cows, MilkProduction, Breed, FeedType, DailyFeedingLog, DailyFeedQuantity, BreedingRecords, CowHealthRecord, Calf, Notification, MilkSales, Expense, EXPENSE_CATEGORIES, ContactMessage
 from datetime import datetime
 from django.utils import timezone
+from decimal import Decimal
+from django.contrib.auth import get_user_model
 
+user = get_user_model()
 class RegisterSerializer(serializers.ModelSerializer):
     """
     Serializer for user registration.
@@ -19,7 +22,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=True)
 
     class Meta:
-        model = User
+        model = user  # <-- Use the variable, not 'User'
         # Fields to be included in the serializer for registration
         fields = ('username', 'email', 'password', 'password2')
         # Extra arguments for username field (e.g., uniqueness)
@@ -36,11 +39,11 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"password": "Passwords do not match."})
 
         # Check if username already exists
-        if User.objects.filter(username=data['username']).exists():
+        if user.objects.filter(username=data['username']).exists():
             raise serializers.ValidationError({"username": "This username is already taken."})
 
         # Check if email already exists
-        if User.objects.filter(email=data['email']).exists():
+        if user.objects.filter(email=data['email']).exists():
             raise serializers.ValidationError({"email": "This email is already registered."})
 
         return data
@@ -50,12 +53,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         Create and return a new `User` instance, given the validated data.
         """
         validated_data.pop('password2')
-        user = User.objects.create_user(
+        return user.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
             password=validated_data['password']
         )
-        return user
 
 
 class LoginSerializer(serializers.Serializer):
@@ -108,7 +110,7 @@ class UserSerializer(serializers.ModelSerializer):
             **validated_data
         )
         return user
-    
+
 class DashboardSerializer(serializers.ModelSerializer):
     class Meta:
         model = farmuser
@@ -337,24 +339,39 @@ class CowHealthRecordSerializer(serializers.ModelSerializer):
     Serializer for the CowHealthRecord model.
     Handles nested cow data.
     """
+    # This field will display the cow's name for read operations.
+    # It's read_only=True because it's derived from the 'cow' ForeignKey.
     cow_name = serializers.CharField(source='cow.name', read_only=True)
+    
+    # Removed: recorded_by_username = serializers.CharField(source='recorded_by.username', read_only=True)
 
     class Meta:
         model = CowHealthRecord
-        fields = '__all__'
+        fields = '__all__' # Includes all fields from the model
         extra_kwargs = {
+            # 'recorded_at' should be automatically set by Django's auto_now_add=True
+            # or auto_now=True if it's a DateTimeField. Marking it read_only here
+            # ensures it's not expected in client input.
             'recorded_at': {'read_only': True}
         }
+        # Removed: 'recorded_by' from read_only_fields
+        read_only_fields = [] # No read_only_fields if 'recorded_by' is removed or not handled here
 
-    def create(self, validated_data):
-        user = self.context['request'].user
+    def create(self, validated_data): # Removed **kwargs
+        """
+        Create and return a new `CowHealthRecord` instance, given the validated data.
+        """
+        # The 'recorded_by' user is no longer expected via kwargs.
+        # This assumes 'recorded_by' will be handled elsewhere or is no longer a required field.
         return CowHealthRecord.objects.create(**validated_data)
+    
+    # Your existing validate method is good for ensuring 'cow' is present.
     def validate(self, data):
         if not data.get('cow'):
             raise serializers.ValidationError({"cow": "This field is required."})
-
         return data
 
+    
 class CalfSerializer(serializers.ModelSerializer):
     dam_details = CowSerializer(source='dam', read_only=True)
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
@@ -370,3 +387,63 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = ['id', 'message', 'created_at', 'created_by', 'created_by_name']
         read_only_fields = ['created_at', 'created_by', 'created_by_name']
+
+class MilkSalesSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the MilkSales model.
+    Handles nested cow data and includes total amount calculation.
+    """
+    cow_name = serializers.CharField(source='milk_record.cow.name', read_only=True)
+
+    class Meta:
+        model = MilkSales
+        fields = ['id', 'milk_record', 'sale_date', 'quantity_sold', 'price_per_liter', 'total_sale_amount', 'sold_by', 'cow_name']
+        read_only_fields = ['total_sale_amount', 'sold_by', 'cow_name']
+
+    def create(self, validated_data):
+        # Ensure these are Decimal for accurate calculations
+        quantity_sold = Decimal(validated_data.get('quantity_sold')) # <--- CONVERT TO DECIMAL
+        price_per_liter = Decimal(validated_data.get('price_per_liter')) # <--- CONVERT TO DECIMAL
+
+        # Calculate total_sale_amount
+        validated_data['total_sale_amount'] = quantity_sold * price_per_liter
+
+        return MilkSales.objects.create(**validated_data)
+
+User = get_user_model() # Get your custom User model
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the Expense model.
+    Includes worker_paid_name and recorded_by_name for display.
+    """
+    worker_paid_name = serializers.CharField(source='worker_paid.username', read_only=True)
+    recorded_by_name = serializers.CharField(source='recorded_by.username', read_only=True)
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+
+
+    class Meta:
+        model = Expense
+        fields = [
+            'id', 'category', 'category_display', 'amount', 'expense_date', 'description',
+            'worker_paid', 'worker_paid_name', 'recorded_by', 'recorded_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['recorded_by', 'created_at', 'updated_at', 'worker_paid_name', 'recorded_by_name', 'category_display']
+
+    def validate(self, data):
+        # If category is 'Wages', worker_paid must be provided
+        if data.get('category') == 'WAGES' and not data.get('worker_paid'):
+            raise serializers.ValidationError(
+                {"worker_paid": "Worker paid is required for 'Wages' category."}
+            )
+        # If category is not 'Wages', worker_paid should not be set (optional, for strictness)
+        if data.get('category') != 'WAGES' and data.get('worker_paid'):
+            data['worker_paid'] = None # Clear worker_paid if not a wage
+        return data
+    
+class ContactMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactMessage
+        fields = ['id', 'name', 'email', 'message', 'submitted_at']
+        read_only_fields = ['id', 'submitted_at'] # These fields are generated by the server

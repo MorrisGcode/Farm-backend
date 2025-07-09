@@ -2,6 +2,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 from django.utils import timezone
 from datetime import timedelta
+from django.conf import settings
 from django.contrib.auth import get_user_model
 
 class FarmUserManager(BaseUserManager):
@@ -294,6 +295,83 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification from {self.created_by.username} at {self.created_at}"
+    
+class MilkSales(models.Model):
+    milk_record = models.ForeignKey(MilkProduction, on_delete=models.CASCADE, related_name='sales')
+    sale_date = models.DateField(default=timezone.now)
+    quantity_sold = models.FloatField(help_text="Quantity sold in liters")
+    price_per_liter = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price per liter in local currency")
+    total_sale_amount = models.DecimalField(max_digits=10, decimal_places=2, help_text="Total sale amount in local currency")
+    sold_by = models.ForeignKey(get_user_model(), on_delete=models.SET_NULL, null=True)
+
+    def __str__(self):
+        return f"Sale of {self.quantity_sold}L on {self.sale_date} by {self.sold_by.username if self.sold_by else 'Unknown'}"
+
+    class Meta:
+        verbose_name = "Milk Sale"
+        verbose_name_plural = "Milk Sales"
+        ordering = ['-sale_date']
+
+EXPENSE_CATEGORIES = (
+    ('WAGES', 'Wages'),
+    ('FEEDS', 'Feeds'),
+    ('VETERINARY_SERVICES', 'Veterinary Services'),
+    ('FARM_TOOLS', 'Farm Tools'),
+    ('MAINTENANCE', 'Maintenance'),
+    ('TRANSPORT', 'Transport'),
+    ('UTILITIES', 'Utilities'),
+    ('OTHER', 'Other'),
+)
+
+class Expense(models.Model):
+    """
+    Model to track various farm expenses.
+    """
+    category = models.CharField(max_length=50, choices=EXPENSE_CATEGORIES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    expense_date = models.DateField()
+    description = models.TextField(blank=True, null=True)
+    worker_paid = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='expenses_received',
+        help_text="Worker paid, if category is 'Wages'."
+    )
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='expenses_recorded',
+        help_text="User who recorded this expense."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-expense_date', '-created_at']
+        verbose_name = "Expense"
+        verbose_name_plural = "Expenses"
+
+    def __str__(self):
+        return f"{self.category} - Ksh{self.amount} on {self.expense_date}"
+    
+class ContactMessage(models.Model):
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    message = models.TextField()
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-submitted_at'] # Order by most recent first
+        verbose_name = "Contact Message"
+        verbose_name_plural = "Contact Messages"
+
+    def __str__(self):
+        return f"Message from {self.name} ({self.email})"
+
 
 
 
